@@ -1,0 +1,999 @@
+{
+  "name": "Invoice Inbox",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "simple": false,
+        "filters": {
+          "q": "has:attachment filename:pdf"
+        },
+        "options": {
+          "downloadAttachments": true
+        }
+      },
+      "name": "New email with PDF",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "id": "n1",
+      "position": [
+        80,
+        96
+      ],
+      "typeVersion": 1.4
+    },
+    {
+      "parameters": {
+        "jsCode": "const out = [];\nfor (const item of $input.all()) {\n  const bin = item.binary || {};\n  const from = item.json.from;\n  let n = 0;\n  for (const key of Object.keys(bin)) {\n    if (n >= 10) break; // hard cap: 10 PDFs per email\n    const b = bin[key];\n    const isPdf = (b.mimeType || '').includes('pdf') || (b.fileName || '').toLowerCase().endsWith('.pdf');\n    if (!isPdf) continue;\n    n++;\n    out.push({\n      json: {\n        messageId: item.json.id,\n        rowKey: n === 1 ? item.json.id : item.json.id + '#' + n,\n        subject: item.json.subject || '',\n        from: (from && (from.text || from)) || '',\n        fileName: b.fileName || ''\n      },\n      binary: { data: b }\n    });\n  }\n}\nreturn out;"
+      },
+      "name": "Select PDF attachment",
+      "type": "n8n-nodes-base.code",
+      "id": "n2",
+      "position": [
+        304,
+        96
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "jsCode": "const pdfs = $('Select PDF attachment').all();\nconst now = new Date();\nconst todayUTC = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());\n\nreturn $input.all().map((item, i) => {\n  const src = pdfs[i] ? pdfs[i].json : {};\n  const j = item.json;\n  const where = 'email \"' + src.subject + '\" (' + src.fileName + ')';\n  if (j.status !== 'succeeded') {\n    throw new Error('Replicate prediction did not finish (status: ' + j.status + ') for ' + where + ': ' + (j.error || 'no error message'));\n  }\n  let raw = Array.isArray(j.output) ? j.output.join('') : String(j.output ?? '');\n  raw = String(raw).replace(/```json|```/gi, '').trim();\n\n  let d;\n  try { d = JSON.parse(raw); }\n  catch (e) { throw new Error('Replicate returned invalid JSON for ' + where + ': ' + raw.slice(0, 200)); }\n  if (!d || typeof d !== 'object') {\n    throw new Error('Replicate returned no JSON object for ' + where + ': ' + raw.slice(0, 200));\n  }\n\n  const base = {\n    messageId: src.messageId,\n    rowKey: src.rowKey,\n    fileName: src.fileName,\n    subject: src.subject,\n    from: src.from,\n    processedAt: now.toISOString()\n  };\n\n  // Anything the model did not clearly mark as an invoice goes to the Review tab.\n  if (d.is_invoice !== true) {\n    return { json: { ...base, isInvoice: false, reviewStatus: 'Not an invoice', vendor: d.vendor ? String(d.vendor).trim() : '', invoiceNumber: '', totalAmount: '', currency: '' } };\n  }\n\n  const rawAmount = String(d.total_amount ?? '').trim();\n  const amount = Number(rawAmount.replace(/[^0-9.\\-]/g, ''));\n  if (!d.vendor || rawAmount === '' || !Number.isFinite(amount)) {\n    throw new Error('Could not read vendor/total from invoice in ' + where);\n  }\n\n  let dueDate = null, daysUntilDue = null;\n  const m = /^(\\d{4})-(\\d{2})-(\\d{2})$/.exec(String(d.due_date || ''));\n  if (m) {\n    dueDate = m[0];\n    daysUntilDue = Math.round((Date.UTC(+m[1], +m[2] - 1, +m[3]) - todayUTC) / 86400000);\n  }\n\n  return {\n    json: {\n      ...base,\n      isInvoice: true,\n      vendor: String(d.vendor).trim(),\n      invoiceNumber: d.invoice_number ? String(d.invoice_number).trim() : '',\n      totalAmount: amount,\n      currency: d.currency ? String(d.currency).toUpperCase() : '',\n      dueDate,\n      daysUntilDue,\n      dueSoon: daysUntilDue !== null && daysUntilDue <= 7\n    }\n  };\n});"
+      },
+      "name": "Parse invoice fields & days left",
+      "type": "n8n-nodes-base.code",
+      "id": "n4",
+      "position": [
+        1040,
+        112
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Sheet1"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [
+            "Message ID"
+          ],
+          "value": {
+            "Processed At": "={{ $json.processedAt }}",
+            "Vendor": "={{ $json.vendor }}",
+            "Invoice Number": "={{ $json.invoiceNumber }}",
+            "Total Amount": "={{ $json.totalAmount }}",
+            "Currency": "={{ $json.currency }}",
+            "Due Date": "={{ $json.dueDate ?? '' }}",
+            "Days Until Due": "={{ $json.daysUntilDue ?? '' }}",
+            "Email Subject": "={{ $json.subject }}",
+            "From": "={{ $json.from }}",
+            "Message ID": "={{ $json.rowKey }}"
+          },
+          "schema": [
+            {
+              "id": "Processed At",
+              "displayName": "Processed At",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Vendor",
+              "displayName": "Vendor",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Invoice Number",
+              "displayName": "Invoice Number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Total Amount",
+              "displayName": "Total Amount",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Currency",
+              "displayName": "Currency",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Due Date",
+              "displayName": "Due Date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Days Until Due",
+              "displayName": "Days Until Due",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Email Subject",
+              "displayName": "Email Subject",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "From",
+              "displayName": "From",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Message ID",
+              "displayName": "Message ID",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Log invoice to Invoice Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "id": "n5",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "position": [
+        1152,
+        464
+      ],
+      "typeVersion": 4.7
+    },
+    {
+      "parameters": {
+        "resource": "label",
+        "returnAll": true
+      },
+      "name": "Get Gmail labels",
+      "type": "n8n-nodes-base.gmail",
+      "id": "n6",
+      "executeOnce": true,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "position": [
+        1360,
+        464
+      ],
+      "typeVersion": 2.2
+    },
+    {
+      "parameters": {
+        "jsCode": "const label = $input.all().find(l => l.json.name === 'Invoices/Processed');\nif (!label) {\n  throw new Error('Gmail label \"Invoices/Processed\" does not exist. Create it in Gmail, then re-run.');\n}\nreturn $('Log invoice to Invoice Log').all().map(r => {\n  const x = r.json;\n  const key = String(x['Message ID'] || '');\n  const raw = x['Days Until Due'];\n  const days = (raw === '' || raw === null || raw === undefined) ? null : Number(raw);\n  return {\n    json: {\n      messageId: key.split('#')[0],\n      rowKey: key,\n      vendor: x['Vendor'],\n      invoiceNumber: x['Invoice Number'],\n      totalAmount: x['Total Amount'],\n      currency: x['Currency'],\n      dueDate: x['Due Date'] || null,\n      daysUntilDue: days,\n      dueSoon: days !== null && Number.isFinite(days) && days <= 7,\n      labelId: label.json.id\n    }\n  };\n});"
+      },
+      "name": "Resolve Invoices/Processed label ID",
+      "type": "n8n-nodes-base.code",
+      "id": "n7",
+      "position": [
+        1584,
+        464
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "operation": "addLabels",
+        "messageId": "={{ $json.messageId }}",
+        "labelIds": "={{ [$json.labelId] }}"
+      },
+      "name": "Apply Invoices/Processed label",
+      "type": "n8n-nodes-base.gmail",
+      "id": "n8",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "position": [
+        1824,
+        464
+      ],
+      "typeVersion": 2.2
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.dueSoon }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Due within 7 days?",
+      "type": "n8n-nodes-base.if",
+      "id": "n9",
+      "position": [
+        1824,
+        688
+      ],
+      "typeVersion": 2.3
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "invoices"
+        },
+        "text": "=:rotating_light: *Invoice due {{ $json.daysUntilDue < 0 ? 'and OVERDUE by ' + Math.abs($json.daysUntilDue) + ' day(s)' : ($json.daysUntilDue === 0 ? 'TODAY' : 'in ' + $json.daysUntilDue + ' day(s)') }}*\n• *Vendor:* {{ $json.vendor }}\n• *Amount:* {{ $json.totalAmount }} {{ $json.currency }}\n• *Due date:* {{ $json.dueDate }}\n• *Invoice #:* {{ $json.invoiceNumber || 'n/a' }}",
+        "otherOptions": {}
+      },
+      "name": "Alert #invoices in Slack",
+      "type": "n8n-nodes-base.slack",
+      "id": "n10",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "position": [
+        2112,
+        688
+      ],
+      "typeVersion": 2.5
+    },
+    {
+      "parameters": {},
+      "name": "On workflow failure",
+      "type": "n8n-nodes-base.errorTrigger",
+      "id": "n11",
+      "position": [
+        1168,
+        1040
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "workflow-alerts"
+        },
+        "text": "=:x: *Workflow failed:* {{ $json.workflow.name }}\n*Node:* {{ $json.execution.lastNodeExecuted }}\n*Error:* {{ $json.execution.error.message }}\n{{ $json.execution.url }}",
+        "otherOptions": {}
+      },
+      "name": "Alert failure in Slack",
+      "type": "n8n-nodes-base.slack",
+      "id": "n12",
+      "position": [
+        1376,
+        1040
+      ],
+      "typeVersion": 2.5
+    },
+    {
+      "parameters": {
+        "operation": "pdf",
+        "options": {}
+      },
+      "name": "Extract text from PDF",
+      "type": "n8n-nodes-base.extractFromFile",
+      "id": "n13",
+      "typeVersion": 1.1,
+      "position": [
+        512,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.replicate.com/v1/models/openai/gpt-4o-mini/predictions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Prefer",
+              "value": "wait=60"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ input: { system_prompt: 'You read vendor invoices. Reply with ONLY a JSON object with these keys: is_invoice (true only if this document is a vendor invoice or bill asking for payment; false for receipts, contracts, newsletters, statements or anything else), vendor (company issuing the invoice), invoice_number (string), total_amount (number, final total due, digits only, dot as decimal separator), currency (3-letter ISO 4217 code such as USD, EUR, GBP), due_date (YYYY-MM-DD, or null if none is shown). Use null for anything you cannot find. Never guess. No prose, no code fences.', prompt: 'Invoice text:\\n\\n' + String($json.text || '').slice(0, 30000) + '\\n\\nReturn the JSON object now.', temperature: 0, max_completion_tokens: 400 } }) }}",
+        "options": {
+          "timeout": 90000
+        }
+      },
+      "name": "Extract invoice fields with Replicate",
+      "type": "n8n-nodes-base.httpRequest",
+      "id": "n15",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 3000,
+      "typeVersion": 4.4,
+      "position": [
+        816,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "approvalThreshold",
+              "value": 5000,
+              "type": "number"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "name": "Set approval limit",
+      "type": "n8n-nodes-base.set",
+      "id": "2c396cc6-b138-42fb-999f-fa5fc8d68d10",
+      "position": [
+        1280,
+        112
+      ],
+      "typeVersion": 3.5
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c21",
+              "leftValue": "={{ $json.totalAmount }}",
+              "rightValue": "={{ $json.approvalThreshold }}",
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Needs approval?",
+      "type": "n8n-nodes-base.if",
+      "id": "e690583f-9450-4f92-ba87-0553cf6fabc1",
+      "position": [
+        1808,
+        96
+      ],
+      "typeVersion": 2.4
+    },
+    {
+      "parameters": {
+        "operation": "sendAndWait",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "invoices"
+        },
+        "message": "=:warning: *Approval needed: large invoice*\n• *Vendor:* {{ $json.vendor }}\n• *Amount:* {{ $json.totalAmount }} {{ $json.currency }}\n• *Invoice #:* {{ $json.invoiceNumber || 'n/a' }}\n• *Due date:* {{ $json.dueDate || 'n/a' }}\n• *From:* {{ $json.from }}\n• *Subject:* {{ $json.subject }}\n\nApproval limit: {{ $json.approvalThreshold }}. No answer within 24 hours is logged as Timed out.",
+        "approvalOptions": {
+          "values": {
+            "approvalType": "double",
+            "disapproveLabel": "Reject"
+          }
+        },
+        "options": {
+          "limitWaitTime": {
+            "values": {
+              "resumeAmount": 24
+            }
+          },
+          "appendAttribution": false
+        }
+      },
+      "name": "Ask approver in Slack",
+      "type": "n8n-nodes-base.slack",
+      "id": "fd3918b3-5b8d-4241-8391-5abab1088a69",
+      "position": [
+        2064,
+        96
+      ],
+      "typeVersion": 2.7
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 4
+          },
+          "conditions": [
+            {
+              "id": "c22",
+              "leftValue": "={{ $json.data?.approved === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Approved?",
+      "type": "n8n-nodes-base.if",
+      "id": "34000e19-3c00-4545-8a10-b1d4a734945c",
+      "position": [
+        2256,
+        96
+      ],
+      "typeVersion": 2.4
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map((item, i) => {\n  const src = $('Needs approval?').itemMatching(i);\n  return { json: { ...src.json } };\n});"
+      },
+      "name": "Restore invoice data",
+      "type": "n8n-nodes-base.code",
+      "id": "a9235ea1-b1dd-4e23-83fc-216ea2146121",
+      "position": [
+        2496,
+        96
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c20",
+              "leftValue": "={{ $json.isInvoice === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Is an invoice?",
+      "type": "n8n-nodes-base.if",
+      "id": "5b45e8c6-6495-475a-9598-af6701595f54",
+      "position": [
+        1568,
+        96
+      ],
+      "typeVersion": 2.4
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map((item, i) => {\n  const src = $('Needs approval?').itemMatching(i);\n  const answer = item.json.data && item.json.data.approved;\n  return { json: { ...src.json, reviewStatus: answer === false ? 'Rejected' : 'Timed out' } };\n});"
+      },
+      "name": "Build review row",
+      "type": "n8n-nodes-base.code",
+      "id": "44ceca01-4ada-41ca-b27b-deb5635a7773",
+      "position": [
+        160,
+        496
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Review"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "matchingColumns": [
+            "Message ID"
+          ],
+          "value": {
+            "Status": "={{ $json.reviewStatus }}",
+            "Processed At": "={{ $json.processedAt }}",
+            "Email Subject": "={{ $json.subject }}",
+            "From": "={{ $json.from }}",
+            "File Name": "={{ $json.fileName }}",
+            "Vendor": "={{ $json.vendor }}",
+            "Total Amount": "={{ $json.totalAmount }}",
+            "Currency": "={{ $json.currency }}",
+            "Message ID": "={{ $json.rowKey }}"
+          },
+          "schema": [
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Processed At",
+              "displayName": "Processed At",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Email Subject",
+              "displayName": "Email Subject",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "From",
+              "displayName": "From",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "File Name",
+              "displayName": "File Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Vendor",
+              "displayName": "Vendor",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Total Amount",
+              "displayName": "Total Amount",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Currency",
+              "displayName": "Currency",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Message ID",
+              "displayName": "Message ID",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Log to Review tab",
+      "type": "n8n-nodes-base.googleSheets",
+      "id": "40313308-d03c-45ed-aa8a-36e3b8a1606d",
+      "position": [
+        416,
+        496
+      ],
+      "typeVersion": 4.7
+    },
+    {
+      "parameters": {
+        "content": "## 1 · Receive the invoice\nA new email arrives and its PDF is turned into text.",
+        "height": 320,
+        "width": 688,
+        "color": 5
+      },
+      "id": "3d6a3e80-99c3-49f2-9250-3808f01857d0",
+      "name": "Section 1 · Receive the invoice ~g~{\"v\":1,\"fl\":1}",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 2 · Read the fields\nAI extracts the invoice fields and sets the approval limit.",
+        "height": 320,
+        "width": 720,
+        "color": 6
+      },
+      "id": "bd7ce671-536f-454c-b3e8-e1713906fa40",
+      "name": "Section 2 · Read the fields ~g~{\"v\":1,\"fl\":1}",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        736,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 3 · Check and approve\nValidates the invoice and asks for Slack approval when needed.",
+        "height": 320,
+        "width": 1168
+      },
+      "id": "14bf3425-b55f-4d78-aebe-285ee2e90874",
+      "name": "Section 3 · Check and approve ~g~{\"v\":1,\"fl\":1}",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1504,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 4 · Send to review\nRejected items and non-invoices go to the Review tab.",
+        "height": 528,
+        "width": 688,
+        "color": 4
+      },
+      "id": "a2e6d552-77af-4820-a861-1318f409e8f0",
+      "name": "Section 4 · Send to review ~g~{\"v\":1,\"fl\":1}",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        368
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 5 · Log and label\nLogs the invoice, labels the email and alerts Slack when due soon.",
+        "height": 528,
+        "width": 1936,
+        "color": 5
+      },
+      "id": "1cee8b10-b3d5-484e-bf19-2128c7c61188",
+      "name": "Section 5 · Log and label ~g~{\"v\":1,\"fl\":1}",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        736,
+        368
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 6 · Handle failures\nAny workflow failure is reported in Slack.",
+        "height": 304,
+        "width": 2672,
+        "color": 3
+      },
+      "id": "2b5cbe4c-f7c6-4796-a243-892e00861dc7",
+      "name": "Section 6 · Handle failures ~g~{\"v\":1,\"fl\":1}",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        944
+      ]
+    }
+  ],
+  "connections": {
+    "New email with PDF": {
+      "main": [
+        [
+          {
+            "node": "Select PDF attachment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Select PDF attachment": {
+      "main": [
+        [
+          {
+            "node": "Extract text from PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse invoice fields & days left": {
+      "main": [
+        [
+          {
+            "node": "Set approval limit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log invoice to Invoice Log": {
+      "main": [
+        [
+          {
+            "node": "Get Gmail labels",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Gmail labels": {
+      "main": [
+        [
+          {
+            "node": "Resolve Invoices/Processed label ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Resolve Invoices/Processed label ID": {
+      "main": [
+        [
+          {
+            "node": "Apply Invoices/Processed label",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Due within 7 days?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Due within 7 days?": {
+      "main": [
+        [
+          {
+            "node": "Alert #invoices in Slack",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "On workflow failure": {
+      "main": [
+        [
+          {
+            "node": "Alert failure in Slack",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract text from PDF": {
+      "main": [
+        [
+          {
+            "node": "Extract invoice fields with Replicate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract invoice fields with Replicate": {
+      "main": [
+        [
+          {
+            "node": "Parse invoice fields & days left",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set approval limit": {
+      "main": [
+        [
+          {
+            "node": "Is an invoice?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Needs approval?": {
+      "main": [
+        [
+          {
+            "node": "Ask approver in Slack",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log invoice to Invoice Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ask approver in Slack": {
+      "main": [
+        [
+          {
+            "node": "Approved?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Approved?": {
+      "main": [
+        [
+          {
+            "node": "Restore invoice data",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build review row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Restore invoice data": {
+      "main": [
+        [
+          {
+            "node": "Log invoice to Invoice Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is an invoice?": {
+      "main": [
+        [
+          {
+            "node": "Needs approval?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log to Review tab",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build review row": {
+      "main": [
+        [
+          {
+            "node": "Log to Review tab",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {}
+}

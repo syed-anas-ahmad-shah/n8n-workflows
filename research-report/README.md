@@ -4,6 +4,8 @@ Takes a topic, runs five research tasks, stores a draft report in Supabase and a
 
 34 working nodes in 8 labelled sections.
 
+![The Research Report Generator workflow in 8 labelled sections](workflow-overview.png)
+
 **Status:** shared as a work in progress. This version has not had a verified end-to-end run, so test it before you rely on it.
 
 ## How it works
@@ -36,5 +38,7 @@ Takes a topic, runs five research tasks, stores a draft report in Supabase and a
 | Translation | Translates the topic, not the summary |
 | Order | The tasks run one after another, not at the same time |
 | Retries | Each retry saves another draft row |
+| Approval | The approval email has no time limit |
+| Request errors | A failed request to Replicate stops the run before the failure logging sees it |
 
 The topic and image URL are sent to Replicate, so do not use private data.

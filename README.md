@@ -5,6 +5,7 @@ Ready-to-import n8n workflows, each in its own folder with a README, the workflo
 | Workflow | What it does |
 |---|---|
 | [Invoice Inbox](invoice-inbox/) | Watches Gmail for PDF invoices, reads the fields with AI, asks for approval in Slack on large amounts, logs to Google Sheets, labels the email and alerts Slack when payment is due soon |
+| [Research Report Generator](research-report/) | Work in progress: runs research tasks on a topic, saves a draft report to Supabase, retries on low confidence and asks for email approval |
 
 ## How to use one
 

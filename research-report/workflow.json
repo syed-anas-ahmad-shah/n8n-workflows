@@ -1,0 +1,1204 @@
+{
+  "name": "Research Report Generator",
+  "nodes": [
+    {
+      "parameters": {},
+      "name": "Start",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        208,
+        96
+      ],
+      "id": "900c024a-566d-41a3-ab75-b65592283c78"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "name": "topic",
+              "type": "string",
+              "value": "Impact of AI on renewable energy adoption"
+            },
+            {
+              "name": "depth",
+              "type": "number",
+              "value": 0
+            },
+            {
+              "name": "image_url",
+              "type": "string",
+              "value": "https://upload.wikimedia.org/wikipedia/commons/thumb/3/3d/Solar_panels_on_a_roof.jpg/640px-Solar_panels_on_a_roof.jpg"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Topic & Depth",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        400,
+        96
+      ],
+      "id": "bf86f25b-97e5-46d6-a557-90c62082cccd"
+    },
+    {
+      "parameters": {
+        "jsCode": "const resumeUrl = $execution.resumeUrl;\nreturn [{ json: { ...items[0].json, resumeUrl, job_type: 'fact_check' } }];"
+      },
+      "name": "Get Resume URL (Fact Check)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1008,
+        96
+      ],
+      "id": "0f467d7b-162e-40c4-9fd7-cb610281648c"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.replicate.com/v1/models/openai/gpt-4o-mini/predictions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ input: { prompt: `Fact-check the following claim/topic and respond ONLY with JSON: {\\\"confidence\\\": \\\"high|low\\\", \\\"verdict\\\": string, \\\"notes\\\": string}. Topic: ${$json.topic}` }, webhook: $json.resumeUrl, webhook_events_filter: [\"completed\"] }) }}",
+        "options": {}
+      },
+      "name": "Submit Fact-Check to Replicate",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1232,
+        96
+      ],
+      "id": "959cc0c7-e7f8-452c-addf-85e546600f2a"
+    },
+    {
+      "parameters": {
+        "resume": "webhook",
+        "httpMethod": "POST",
+        "limitWaitTime": true,
+        "resumeAmount": 2,
+        "resumeUnit": "minutes",
+        "options": {}
+      },
+      "name": "Wait for Fact-Check Result",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1456,
+        96
+      ],
+      "id": "dad0468a-e413-46c6-bcf0-1f7f941b4632"
+    },
+    {
+      "parameters": {
+        "jsCode": "const src = $('Get Resume URL (Fact Check)').item.json;\nconst body = items[0].json.body || items[0].json;\nconst output = body?.output;\nlet parsed = null;\nlet success = false;\nlet error = null;\ntry {\n  const raw = Array.isArray(output) ? output.join('') : output;\n  const text = raw.replace(/^```(?:json)?\\s*/i, '').replace(/```\\s*$/i, '').trim();\n  parsed = JSON.parse(text);\n  success = true;\n} catch (e) {\n  error = 'Failed to parse fact-check output: ' + e.message;\n}\nreturn [{ json: { job_type: 'fact_check', success, data: parsed, error, retryable: !success, topic: src.topic, depth: src.depth, image_url: src.image_url } }];"
+      },
+      "name": "Parse Fact-Check Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        96
+      ],
+      "id": "3e4a7968-29a3-4177-bebe-22cf2fed6b1d"
+    },
+    {
+      "parameters": {
+        "jsCode": "const resumeUrl = $execution.resumeUrl;\nreturn [{ json: { ...items[0].json, resumeUrl, job_type: 'image_analysis' } }];"
+      },
+      "name": "Get Resume URL (Image Analysis)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2016,
+        96
+      ],
+      "id": "e2907bbd-5fef-4a0a-8b91-f1d449b38167"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.replicate.com/v1/models/openai/gpt-4o-mini/predictions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ input: { prompt: `Analyze the image related to the topic: ${$json.topic}. Describe key visual elements and relevance.`, image_input: [$json.image_url] }, webhook: $json.resumeUrl, webhook_events_filter: [\"completed\"] }) }}",
+        "options": {}
+      },
+      "name": "Submit Image Analysis to Replicate",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2224,
+        96
+      ],
+      "id": "9aff37a4-ac31-463a-9ed1-85c55b4ccfbc"
+    },
+    {
+      "parameters": {
+        "resume": "webhook",
+        "httpMethod": "POST",
+        "limitWaitTime": true,
+        "resumeAmount": 2,
+        "resumeUnit": "minutes",
+        "options": {}
+      },
+      "name": "Wait for Image Analysis Result",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2432,
+        96
+      ],
+      "id": "65f61dda-3ddb-41e0-9647-8ebd051543ce"
+    },
+    {
+      "parameters": {
+        "jsCode": "const src = $('Get Resume URL (Image Analysis)').item.json;\nconst body = items[0].json.body || items[0].json;\nconst output = body?.output;\nconst text = Array.isArray(output) ? output.join('') : output;\nconst success = !!text;\nreturn [{ json: { job_type: 'image_analysis', success, data: text || null, error: success ? null : 'No output from image analysis', retryable: !success, topic: src.topic, depth: src.depth, image_url: src.image_url } }];"
+      },
+      "name": "Parse Image Analysis Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2640,
+        96
+      ],
+      "id": "e016e222-1103-4294-8ed3-565fc6845058"
+    },
+    {
+      "parameters": {
+        "jsCode": "const resumeUrl = $execution.resumeUrl;\nreturn [{ json: { ...items[0].json, resumeUrl, job_type: 'summary' } }];"
+      },
+      "name": "Get Resume URL (Summarize)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        64,
+        448
+      ],
+      "id": "f86e07af-014b-4c45-be51-c6aa2d001811"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.replicate.com/v1/models/openai/gpt-4o-mini/predictions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ input: { prompt: `Write a concise, well-structured summary of the topic: ${$json.topic}` }, webhook: $json.resumeUrl, webhook_events_filter: [\"completed\"] }) }}",
+        "options": {}
+      },
+      "name": "Submit Summarize to Replicate",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        272,
+        448
+      ],
+      "id": "e08bcc5e-22cd-4237-8874-7f75f26818bf"
+    },
+    {
+      "parameters": {
+        "resume": "webhook",
+        "httpMethod": "POST",
+        "limitWaitTime": true,
+        "resumeAmount": 2,
+        "resumeUnit": "minutes",
+        "options": {}
+      },
+      "name": "Wait for Summarize Result",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        512,
+        448
+      ],
+      "id": "dc8fa09f-cfbd-4b9e-9a93-ba75f8db7a72"
+    },
+    {
+      "parameters": {
+        "jsCode": "const src = $('Get Resume URL (Summarize)').item.json;\nconst body = items[0].json.body || items[0].json;\nconst output = body?.output;\nconst text = Array.isArray(output) ? output.join('') : output;\nconst success = !!text;\nreturn [{ json: { job_type: 'summary', success, data: text || null, error: success ? null : 'No output from summarizer', retryable: !success, topic: src.topic, depth: src.depth, image_url: src.image_url } }];"
+      },
+      "name": "Parse Summarize Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        736,
+        448
+      ],
+      "id": "7ee41e5a-e381-4bb5-a6a0-8b677b842aea"
+    },
+    {
+      "parameters": {
+        "jsCode": "const resumeUrl = $execution.resumeUrl;\nreturn [{ json: { ...items[0].json, resumeUrl, job_type: 'translation' } }];"
+      },
+      "name": "Get Resume URL (Translate)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1024,
+        448
+      ],
+      "id": "32d9f864-25d2-4910-9424-d1b30f57b6bf"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.replicate.com/v1/models/openai/gpt-4o-mini/predictions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ input: { prompt: `Translate the following into Spanish, preserving meaning: ${$json.topic}` }, webhook: $json.resumeUrl, webhook_events_filter: [\"completed\"] }) }}",
+        "options": {}
+      },
+      "name": "Submit Translate to Replicate",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1232,
+        448
+      ],
+      "id": "d1e2980d-95c9-4411-8676-f5124a71f5df"
+    },
+    {
+      "parameters": {
+        "resume": "webhook",
+        "httpMethod": "POST",
+        "limitWaitTime": true,
+        "resumeAmount": 2,
+        "resumeUnit": "minutes",
+        "options": {}
+      },
+      "name": "Wait for Translate Result",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1456,
+        448
+      ],
+      "id": "894052cb-fa57-4a7f-ae5d-e7891df2db78"
+    },
+    {
+      "parameters": {
+        "jsCode": "const src = $('Get Resume URL (Translate)').item.json;\nconst body = items[0].json.body || items[0].json;\nconst output = body?.output;\nconst text = Array.isArray(output) ? output.join('') : output;\nconst success = !!text;\nreturn [{ json: { job_type: 'translation', success, data: text || null, error: success ? null : 'No output from translator', retryable: !success, topic: src.topic, depth: src.depth, image_url: src.image_url } }];"
+      },
+      "name": "Parse Translate Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1680,
+        448
+      ],
+      "id": "266fae86-bbf3-48d9-9f1d-e7f233ca87ec"
+    },
+    {
+      "parameters": {
+        "jsCode": "return [{ json: { ...items[0].json, job_type: 'search' } }];"
+      },
+      "name": "Prepare Search",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2112,
+        448
+      ],
+      "id": "e6d51822-9ba2-4878-8aff-92d83a18b9f3"
+    },
+    {
+      "parameters": {
+        "url": "https://en.wikipedia.org/w/api.php",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "action",
+              "value": "query"
+            },
+            {
+              "name": "list",
+              "value": "search"
+            },
+            {
+              "name": "srsearch",
+              "value": "={{$json.topic}}"
+            },
+            {
+              "name": "format",
+              "value": "json"
+            },
+            {
+              "name": "srlimit",
+              "value": "3"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Search Wikipedia",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        2320,
+        448
+      ],
+      "id": "4926b28a-1c74-4490-90a2-aa0c41b05f1b"
+    },
+    {
+      "parameters": {
+        "jsCode": "const src = $('Prepare Search').item.json;\nconst results = items[0].json?.query?.search || [];\nconst success = results.length > 0;\nconst data = results.map(r => ({ title: r.title, snippet: String(r.snippet || '').replace(/<[^>]+>/g, '') }));\nreturn [{ json: { job_type: 'search', success, data, error: success ? null : 'No Wikipedia results found', retryable: false, topic: src.topic, depth: src.depth, image_url: src.image_url } }];"
+      },
+      "name": "Parse Wikipedia Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2544,
+        448
+      ],
+      "id": "ee87f5a8-1628-47b4-9199-01b033d9eb0a"
+    },
+    {
+      "parameters": {
+        "numberInputs": 5
+      },
+      "name": "Merge Sub-task Results",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        416,
+        800
+      ],
+      "id": "e500c054-12d4-48ce-a946-6b96f772bc43"
+    },
+    {
+      "parameters": {
+        "jsCode": "const byType = {};\nfor (const item of items) { byType[item.json.job_type] = item.json; }\nconst first = items[0].json;\nconst has_partial_failure = items.some(i => !i.json.success);\nreturn [{ json: { topic: first.topic, depth: first.depth, image_url: first.image_url, search: byType.search, image_analysis: byType.image_analysis, summary: byType.summary, fact_check: byType.fact_check, translation: byType.translation, has_partial_failure, status: 'draft' } }];"
+      },
+      "name": "Build Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        624,
+        848
+      ],
+      "id": "3fa6a2fd-87a8-4bc6-a308-132ad1851833"
+    },
+    {
+      "parameters": {
+        "tableId": "reports",
+        "dataToSend": "autoMapInputData"
+      },
+      "name": "Insert Draft Report to Supabase",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        848,
+        848
+      ],
+      "id": "0efcc493-df46-45de-86d9-1407590f1c3e"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "leftValue": "={{$json.has_partial_failure}}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "id": "acc42098-7a6c-4d50-85a3-c0b5a718bb63"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Has Partial Failure?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        816,
+        1056
+      ],
+      "id": "4b5ab1b1-9e40-485d-8f01-754e07a2e596"
+    },
+    {
+      "parameters": {
+        "tableId": "errors",
+        "dataToSend": "autoMapInputData"
+      },
+      "name": "Log Failures to Supabase",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1072,
+        1056
+      ],
+      "id": "dac6beb2-f21c-4744-ade0-84d23ebd09d0"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "leftValue": "={{$json.fact_check?.data?.confidence}}",
+              "rightValue": "low",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "id": "3b4dde10-3f2f-401d-94e7-72ae0e11553c"
+            },
+            {
+              "leftValue": "={{$json.depth}}",
+              "rightValue": 2,
+              "operator": {
+                "type": "number",
+                "operation": "lt"
+              },
+              "id": "b8013341-0aa8-4cad-b081-ffb4c7e66d36"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Confidence Gate",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1088,
+        848
+      ],
+      "id": "7f94e743-d73d-480d-92cf-8f171b876232"
+    },
+    {
+      "parameters": {
+        "jsCode": "const prev = items[0].json;\nreturn [{ json: { topic: `${prev.topic} (refine: focus on verifiable, recent, precise facts)`, depth: (prev.depth || 0) + 1, image_url: prev.image_url } }];"
+      },
+      "name": "Retry: Sharpen Query",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        848
+      ],
+      "id": "02927a38-3d80-4bb7-b3be-26ea1e8d7aa1"
+    },
+    {
+      "parameters": {
+        "operation": "sendAndWait",
+        "fromEmail": "you@example.com",
+        "toEmail": "you@example.com",
+        "subject": "=Approve Research Report: {{$json.topic}}",
+        "message": "=A new research report draft is ready for review.\n\nTopic: {{$json.topic}}\n\nSummary: {{$json.summary?.data}}\n\nFact-check: {{JSON.stringify($json.fact_check?.data)}}\n\nPlease approve or reject below.",
+        "approvalOptions": {
+          "values": {
+            "approvalType": "double",
+            "disapproveLabel": "Reject"
+          }
+        },
+        "options": {}
+      },
+      "name": "Send Approval Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1968,
+        800
+      ],
+      "id": "966152e1-0d7d-4f7b-82a0-6df807c71691"
+    },
+    {
+      "parameters": {
+        "jsCode": "const approvalData = items[0].json.data || items[0].json;\nconst reportId = $('Insert Draft Report to Supabase').item.json.id;\nreturn [{ json: { approved: !!approvalData.approved, reportId } }];"
+      },
+      "name": "Extract Approval",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2176,
+        800
+      ],
+      "id": "b2f32923-93e5-4021-bd7e-8402f8d825fa"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "leftValue": "={{$json.approved}}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "id": "71bc4a74-607b-46b9-b7fe-a5b1f225ca37"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Approved?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2384,
+        800
+      ],
+      "id": "6da45b6d-b936-4234-af4c-6e7f6ade4abb"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "reports",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{$json.reportId}}"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "status",
+              "fieldValue": "approved"
+            }
+          ]
+        }
+      },
+      "name": "Finalize: Update Report Approved",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        2624,
+        800
+      ],
+      "id": "0f915455-240f-4b09-ac6d-c0a3c7693d86"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "reports",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{$json.reportId}}"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "status",
+              "fieldValue": "rejected"
+            }
+          ]
+        }
+      },
+      "name": "Finalize: Update Report Rejected",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        2624,
+        1024
+      ],
+      "id": "e82075f0-1fcb-4afd-9908-a6572d8c663f"
+    },
+    {
+      "parameters": {},
+      "name": "Start Research Tasks",
+      "type": "n8n-nodes-base.noOp",
+      "id": "dd0a5849-30a3-44ed-904a-145b72d27065",
+      "position": [
+        608,
+        96
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "content": "## 1 · Set the topic\nA manual start captures the topic and depth, then kicks off all research tasks.",
+        "height": 304,
+        "width": 896,
+        "color": 5
+      },
+      "id": "4faad28c-7f28-418f-b67a-39edf4306a3b",
+      "name": "Section 1 · Set the topic ~g~{\"v\":1,\"fl\":1}",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 2 · Fact-check the topic\nSends the topic to Replicate for fact-checking and waits for the answer.",
+        "height": 304,
+        "width": 912,
+        "color": 4
+      },
+      "id": "bdc4e543-486c-46fd-a42f-3ff62bc8e792",
+      "name": "Section 2 · Fact-check the topic ~g~{\"v\":1,\"fl\":1}",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        944,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 3 · Analyse images\nRuns image analysis on Replicate and parses the result.",
+        "height": 304,
+        "width": 944,
+        "color": 6
+      },
+      "id": "93cd900d-389d-4bf7-b80d-7a4d541ee84b",
+      "name": "Section 3 · Analyse images ~g~{\"v\":1,\"fl\":1}",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1904,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 4 · Summarize\nHas Replicate write a summary and parses it.",
+        "height": 304,
+        "width": 896
+      },
+      "id": "2891c5cd-0b4b-4a54-8d95-065859b02a3d",
+      "name": "Section 4 · Summarize ~g~{\"v\":1,\"fl\":1}",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        352
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 5 · Translate\nHas Replicate translate the content and parses it.",
+        "height": 304,
+        "width": 912,
+        "color": 5
+      },
+      "id": "e81da494-69a0-4800-b9b8-f9a70054972e",
+      "name": "Section 5 · Translate ~g~{\"v\":1,\"fl\":1}",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        944,
+        352
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 6 · Search Wikipedia\nPrepares a query, searches Wikipedia and parses the hits.",
+        "height": 304,
+        "width": 944,
+        "color": 4
+      },
+      "id": "d846b43d-e92a-401d-854b-d3000507225e",
+      "name": "Section 6 · Search Wikipedia ~g~{\"v\":1,\"fl\":1}",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1904,
+        352
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 7 · Build, save and check\nMerges all results into one report, stores the draft, logs partial failures and retries when confidence is low.",
+        "height": 544,
+        "width": 1856
+      },
+      "id": "cb41bca2-bfe3-4f9a-8d04-d0ee28b6806e",
+      "name": "Section 7 · Build, save and check ~g~{\"v\":1,\"fl\":1}",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        704
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## 8 · Approve and finalize\nEmails for approval, then marks the report approved or rejected.",
+        "height": 544,
+        "width": 944,
+        "color": 7
+      },
+      "id": "c845f7c1-95b1-4069-9cad-c7286a2643a4",
+      "name": "Section 8 · Approve and finalize ~g~{\"v\":1,\"fl\":1}",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1904,
+        704
+      ]
+    }
+  ],
+  "connections": {
+    "Start": {
+      "main": [
+        [
+          {
+            "node": "Topic & Depth",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Topic & Depth": {
+      "main": [
+        [
+          {
+            "node": "Start Research Tasks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Resume URL (Fact Check)": {
+      "main": [
+        [
+          {
+            "node": "Submit Fact-Check to Replicate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Submit Fact-Check to Replicate": {
+      "main": [
+        [
+          {
+            "node": "Wait for Fact-Check Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for Fact-Check Result": {
+      "main": [
+        [
+          {
+            "node": "Parse Fact-Check Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Retry: Sharpen Query": {
+      "main": [
+        [
+          {
+            "node": "Start Research Tasks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Resume URL (Image Analysis)": {
+      "main": [
+        [
+          {
+            "node": "Submit Image Analysis to Replicate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Submit Image Analysis to Replicate": {
+      "main": [
+        [
+          {
+            "node": "Wait for Image Analysis Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for Image Analysis Result": {
+      "main": [
+        [
+          {
+            "node": "Parse Image Analysis Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Resume URL (Summarize)": {
+      "main": [
+        [
+          {
+            "node": "Submit Summarize to Replicate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Submit Summarize to Replicate": {
+      "main": [
+        [
+          {
+            "node": "Wait for Summarize Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for Summarize Result": {
+      "main": [
+        [
+          {
+            "node": "Parse Summarize Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Resume URL (Translate)": {
+      "main": [
+        [
+          {
+            "node": "Submit Translate to Replicate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Submit Translate to Replicate": {
+      "main": [
+        [
+          {
+            "node": "Wait for Translate Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for Translate Result": {
+      "main": [
+        [
+          {
+            "node": "Parse Translate Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Search": {
+      "main": [
+        [
+          {
+            "node": "Search Wikipedia",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Wikipedia": {
+      "main": [
+        [
+          {
+            "node": "Parse Wikipedia Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Fact-Check Result": {
+      "main": [
+        [
+          {
+            "node": "Merge Sub-task Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Image Analysis Result": {
+      "main": [
+        [
+          {
+            "node": "Merge Sub-task Results",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Parse Summarize Result": {
+      "main": [
+        [
+          {
+            "node": "Merge Sub-task Results",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Parse Translate Result": {
+      "main": [
+        [
+          {
+            "node": "Merge Sub-task Results",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "Parse Wikipedia Result": {
+      "main": [
+        [
+          {
+            "node": "Merge Sub-task Results",
+            "type": "main",
+            "index": 4
+          }
+        ]
+      ]
+    },
+    "Merge Sub-task Results": {
+      "main": [
+        [
+          {
+            "node": "Build Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Report": {
+      "main": [
+        [
+          {
+            "node": "Insert Draft Report to Supabase",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Has Partial Failure?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Partial Failure?": {
+      "main": [
+        [
+          {
+            "node": "Log Failures to Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert Draft Report to Supabase": {
+      "main": [
+        [
+          {
+            "node": "Confidence Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Confidence Gate": {
+      "main": [
+        [
+          {
+            "node": "Retry: Sharpen Query",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Approval Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Approval Email": {
+      "main": [
+        [
+          {
+            "node": "Extract Approval",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Approval": {
+      "main": [
+        [
+          {
+            "node": "Approved?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Approved?": {
+      "main": [
+        [
+          {
+            "node": "Finalize: Update Report Approved",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Finalize: Update Report Rejected",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Start Research Tasks": {
+      "main": [
+        [
+          {
+            "node": "Get Resume URL (Fact Check)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Resume URL (Image Analysis)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Resume URL (Summarize)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Resume URL (Translate)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Prepare Search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}
